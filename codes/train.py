@@ -45,6 +45,10 @@ def main():
         init_dist()
         world_size = torch.distributed.get_world_size()
         rank = torch.distributed.get_rank()
+    
+    if opt['dist'] == False or rank == 0:
+        if not os.path.exists('/result/tb_logger'):
+            os.makedirs('/result/tb_logger')
 
     #### loading resume state if exists
     if opt['path'].get('resume_state', None):
@@ -150,13 +154,14 @@ def main():
             current_step += 1
             if current_step > total_iters:
                 break
-            #### update learning rate
-            model.update_learning_rate(current_step, warmup_iter=opt['train']['warmup_iter'])
 
             #### training
             model.feed_data(train_data)
             model.optimize_parameters(current_step)
 
+            #### update learning rate
+            model.update_learning_rate(current_step, warmup_iter=opt['train']['warmup_iter'])
+            
             #### log
             if current_step % opt['logger']['print_freq'] == 0:
                 logs = model.get_current_log()
@@ -174,41 +179,42 @@ def main():
                     logger.info(message)
             #### validation
             if opt['datasets'].get('val', None) and current_step % opt['train']['val_freq'] == 0:
-                if opt['model'] in ['sr', 'srgan'] and rank <= 0:  # image restoration validation
-                    # does not support multi-GPU validation
-                    pbar = util.ProgressBar(len(val_loader))
-                    avg_psnr = 0.
-                    idx = 0
-                    for val_data in val_loader:
-                        idx += 1
-                        img_name = os.path.splitext(os.path.basename(val_data['LQ_path'][0]))[0]
-                        img_dir = os.path.join(opt['path']['val_images'], img_name)
-                        util.mkdir(img_dir)
+                if opt['model'] in ['sr', 'srgan']:  # image restoration validation
+                    if rank <= 0:
+                        # does not support multi-GPU validation
+                        pbar = util.ProgressBar(len(val_loader))
+                        avg_psnr = 0.
+                        idx = 0
+                        for val_data in val_loader:
+                            idx += 1
+                            img_name = os.path.splitext(os.path.basename(val_data['LQ_path'][0]))[0]
+                            img_dir = os.path.join(opt['path']['val_images'], img_name)
+                            util.mkdir(img_dir)
 
-                        model.feed_data(val_data)
-                        model.test()
+                            model.feed_data(val_data)
+                            model.test()
 
-                        visuals = model.get_current_visuals()
-                        sr_img = util.tensor2img(visuals['rlt'])  # uint8
-                        gt_img = util.tensor2img(visuals['GT'])  # uint8
+                            visuals = model.get_current_visuals()
+                            sr_img = util.tensor2img(visuals['rlt'])  # uint8
+                            gt_img = util.tensor2img(visuals['GT'])  # uint8
 
-                        # Save SR images for reference
-                        save_img_path = os.path.join(img_dir,
-                                                     '{:s}_{:d}.png'.format(img_name, current_step))
-                        util.save_img(sr_img, save_img_path)
+                            # Save SR images for reference
+                            save_img_path = os.path.join(img_dir,
+                                                        '{:s}_{:d}.png'.format(img_name, current_step))
+                            util.save_img(sr_img, save_img_path)
 
-                        # calculate PSNR
-                        sr_img, gt_img = util.crop_border([sr_img, gt_img], opt['scale'])
-                        avg_psnr += util.calculate_psnr(sr_img, gt_img)
-                        pbar.update('Test {}'.format(img_name))
+                            # calculate PSNR
+                            sr_img, gt_img = util.crop_border([sr_img, gt_img], opt['scale'])
+                            avg_psnr += util.calculate_psnr(sr_img, gt_img)
+                            pbar.update('Test {}'.format(img_name))
 
-                    avg_psnr = avg_psnr / idx
+                        avg_psnr = avg_psnr / idx
 
-                    # log
-                    logger.info('# Validation # PSNR: {:.4e}'.format(avg_psnr))
-                    # tensorboard logger
-                    if opt['use_tb_logger'] and 'debug' not in opt['name']:
-                        tb_logger.add_scalar('psnr', avg_psnr, current_step)
+                        # log
+                        logger.info('# Validation # PSNR: {:.4e}'.format(avg_psnr))
+                        # tensorboard logger
+                        if opt['use_tb_logger'] and 'debug' not in opt['name']:
+                            tb_logger.add_scalar('psnr', avg_psnr, current_step)
                 else:  # video restoration validation
                     if opt['dist']:
                         # multi-GPU testing
