@@ -1,12 +1,12 @@
 
 
-echo "Prepare DIV2K X4 datasets..."
+echo "Prepare DIV2K X2 datasets..."
 cd ../../datasets
 mkdir DIV2K
 cd DIV2K
 
 #### Step 1
-echo "Step 1: Download the datasets: [DIV2K_train_HR] and [DIV2K_train_LR_bicubic_X4]..."
+echo "Step 1: Download the datasets: [DIV2K_train_HR] and [DIV2K_train_LR_bicubic_X2]..."
 # GT
 FOLDER=DIV2K_train_HR
 FILE=DIV2K_train_HR.zip
@@ -19,7 +19,7 @@ if [ ! -d "$FOLDER" ]; then
 fi
 # LR
 FOLDER=DIV2K_train_LR_bicubic
-FILE=DIV2K_train_LR_bicubic_X4.zip
+FILE=DIV2K_train_LR_bicubic_X2.zip
 if [ ! -d "$FOLDER" ]; then
     if [ ! -f "$FILE" ]; then
         echo "Downloading $FILE..."

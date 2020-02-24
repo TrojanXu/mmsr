@@ -15,7 +15,7 @@ import utils.util as util  # noqa: E402
 
 
 def main():
-    dataset = 'DIV2K_demo'  # vimeo90K | REDS | general (e.g., DIV2K, 291) | DIV2K_demo |test
+    dataset = '2000-4K'  # vimeo90K | REDS | general (e.g., DIV2K, 291) | DIV2K_demo |test | 2000-4K
     mode = 'GT'  # used for vimeo90k and REDS datasets
     # vimeo90k: GT | LR | flow
     # REDS: train_sharp, train_sharp_bicubic, train_blur_bicubic, train_blur, train_blur_comp
@@ -41,6 +41,18 @@ def main():
         opt['img_folder'] = '../../datasets/DIV2K/DIV2K800_sub_bicLRx4'
         opt['lmdb_save_path'] = '../../datasets/DIV2K/DIV2K800_sub_bicLRx4.lmdb'
         opt['name'] = 'DIV2K800_sub_bicLRx4'
+        general_image_folder(opt)
+    elif dataset == '2000-4K':
+        opt = {}
+        ## GT
+        opt['img_folder'] = '../../datasets/2000-4K/HR_sub'
+        opt['lmdb_save_path'] = '../../datasets/2000-4K/HR_sub.lmdb'
+        opt['name'] = 'HR_GT'
+        general_image_folder(opt)
+        ## LR
+        opt['img_folder'] = '../../datasets/2000-4K/LR_x2_sub'
+        opt['lmdb_save_path'] = '../../datasets/2000-4K/LR_x2_sub.lmdb'
+        opt['name'] = 'LR_x2'
         general_image_folder(opt)
     elif dataset == 'test':
         test_lmdb('../../datasets/REDS/train_sharp_wval.lmdb', 'REDS')

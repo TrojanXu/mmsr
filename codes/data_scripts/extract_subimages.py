@@ -27,10 +27,10 @@ def main():
         extract_signle(opt)
     elif mode == 'pair':
         GT_folder = '../../datasets/DIV2K/DIV2K_train_HR'
-        LR_folder = '../../datasets/DIV2K/DIV2K_train_LR_bicubic/X4'
+        LR_folder = '../../datasets/DIV2K/DIV2K_train_LR_bicubic/X2'
         save_GT_folder = '../../datasets/DIV2K/DIV2K800_sub'
-        save_LR_folder = '../../datasets/DIV2K/DIV2K800_sub_bicLRx4'
-        scale_ratio = 4
+        save_LR_folder = '../../datasets/DIV2K/DIV2K800_sub_bicLRx2'
+        scale_ratio = 2
         crop_sz = 480  # the size of each sub-image (GT)
         step = 240  # step of the sliding crop window (GT)
         thres_sz = 48  # size threshold
@@ -132,8 +132,8 @@ def worker(path, opt):
             crop_img = np.ascontiguousarray(crop_img)
             cv2.imwrite(
                 osp.join(opt['save_folder'],
-                         img_name.replace('.png', '_s{:03d}.png'.format(index))), crop_img,
-                [cv2.IMWRITE_PNG_COMPRESSION, opt['compression_level']])
+                         img_name.replace('.png', '_s{:03d}.jpg'.format(index))), crop_img,
+                [int(cv2.IMWRITE_JPEG_QUALITY), np.random.randint(70,100)]) # DIV2K is in png format, thus we it a random jpeg quality.
     return 'Processing {:s} ...'.format(img_name)
 
 
