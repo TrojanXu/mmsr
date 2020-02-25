@@ -2,11 +2,13 @@ import logging
 from collections import OrderedDict
 import torch
 import torch.nn as nn
-from torch.nn.parallel import DataParallel, DistributedDataParallel
+from torch.nn.parallel import DataParallel
+from apex.parallel import DistributedDataParallel
 import models.networks as networks
 import models.lr_scheduler as lr_scheduler
 from .base_model import BaseModel
 from models.loss import GANLoss
+from apex import amp
 
 logger = logging.getLogger('base')
 
@@ -22,20 +24,8 @@ class SRGANModel(BaseModel):
 
         # define networks and load pretrained models
         self.netG = networks.define_G(opt).to(self.device)
-        if opt['dist']:
-            self.netG = DistributedDataParallel(self.netG, find_unused_parameters=True, device_ids=[torch.cuda.current_device()])
-        else:
-            self.netG = DataParallel(self.netG)
         if self.is_train:
             self.netD = networks.define_D(opt).to(self.device)
-            if opt['dist']:
-                self.netD = DistributedDataParallel(self.netD, find_unused_parameters=True, 
-                                                    device_ids=[torch.cuda.current_device()])
-            else:
-                self.netD = DataParallel(self.netD)
-
-            self.netG.train()
-            self.netD.train()
 
         # define losses, optimizer and scheduler
         if self.is_train:
@@ -93,12 +83,21 @@ class SRGANModel(BaseModel):
             self.optimizer_G = torch.optim.Adam(optim_params, lr=train_opt['lr_G'],
                                                 weight_decay=wd_G,
                                                 betas=(train_opt['beta1_G'], train_opt['beta2_G']))
-            self.optimizers.append(self.optimizer_G)
+            
             # D
             wd_D = train_opt['weight_decay_D'] if train_opt['weight_decay_D'] else 0
             self.optimizer_D = torch.optim.Adam(self.netD.parameters(), lr=train_opt['lr_D'],
                                                 weight_decay=wd_D,
                                                 betas=(train_opt['beta1_D'], train_opt['beta2_D']))
+            
+            if train_opt['opt_level'] == 'O1':
+                opt_level = 'O1'
+            else:
+                opt_level = 'O0'
+            [self.netG, self.netD], [self.optimizer_G, self.optimizer_D] = amp.initialize(
+                [self.netG, self.netD], [self.optimizer_G, self.optimizer_D], opt_level=opt_level, num_losses=3)
+            
+            self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
 
             # schedulers
@@ -120,6 +119,20 @@ class SRGANModel(BaseModel):
                 raise NotImplementedError('MultiStepLR learning rate scheme is enough.')
 
             self.log_dict = OrderedDict()
+
+        if opt['dist']:
+            self.netG = DistributedDataParallel(self.netG, delay_allreduce=True)
+        else:
+            self.netG = DataParallel(self.netG)
+        if self.is_train:
+            if opt['dist']:
+                self.netD = DistributedDataParallel(self.netD, 
+                                                    delay_allreduce=True)
+            else:
+                self.netD = DataParallel(self.netD)
+
+            self.netG.train()
+            self.netD.train()
 
         self.print_network()  # print network
         self.load()  # load G and D if needed
@@ -160,8 +173,10 @@ class SRGANModel(BaseModel):
                     self.cri_gan(pred_d_real - torch.mean(pred_g_fake), False) +
                     self.cri_gan(pred_g_fake - torch.mean(pred_d_real), True)) / 2
             l_g_total += l_g_gan
-
-            l_g_total.backward()
+            
+            with amp.scale_loss(l_g_total, self.optimizer_G, loss_id=0) as g_total_scaled:
+                g_total_scaled.backward()
+            #l_g_total.backward()
             self.optimizer_G.step()
 
         # D
@@ -174,11 +189,15 @@ class SRGANModel(BaseModel):
             # real
             pred_d_real = self.netD(self.var_ref)
             l_d_real = self.cri_gan(pred_d_real, True)
-            l_d_real.backward()
+            with amp.scale_loss(l_d_real, self.optimizer_D, loss_id=1) as d_real_scaled:
+                d_real_scaled.backward()
+            #l_d_real.backward()
             # fake
             pred_d_fake = self.netD(self.fake_H.detach())  # detach to avoid BP to G
             l_d_fake = self.cri_gan(pred_d_fake, False)
-            l_d_fake.backward()
+            with amp.scale_loss(l_d_fake, self.optimizer_D, loss_id=2) as d_fake_scaled:
+                d_fake_scaled.backward()
+            #l_d_fake.backward()
         elif self.opt['train']['gan_type'] == 'ragan':
             # pred_d_real = self.netD(self.var_ref)
             # pred_d_fake = self.netD(self.fake_H.detach())  # detach to avoid BP to G
@@ -189,10 +208,14 @@ class SRGANModel(BaseModel):
             pred_d_fake = self.netD(self.fake_H.detach()).detach()
             pred_d_real = self.netD(self.var_ref)
             l_d_real = self.cri_gan(pred_d_real - torch.mean(pred_d_fake), True) * 0.5
-            l_d_real.backward()
+            with amp.scale_loss(l_d_real, self.optimizer_D, loss_id=1) as d_real_scaled:
+                d_real_scaled.backward()
+            #l_d_real.backward()
             pred_d_fake = self.netD(self.fake_H.detach())
             l_d_fake = self.cri_gan(pred_d_fake - torch.mean(pred_d_real.detach()), False) * 0.5
-            l_d_fake.backward()
+            with amp.scale_loss(l_d_fake, self.optimizer_D, loss_id=2) as d_fake_scaled:
+                d_fake_scaled.backward()           
+            #l_d_fake.backward()
         self.optimizer_D.step()
 
         # set log
