@@ -90,10 +90,10 @@ class SRGANModel(BaseModel):
                                                 weight_decay=wd_D,
                                                 betas=(train_opt['beta1_D'], train_opt['beta2_D']))
             
-            if train_opt['opt_level'] == 'O1':
-                opt_level = 'O1'
-            else:
-                opt_level = 'O0'
+
+            opt_level = 'O0'
+            if 'opt_level' in train_opt:
+                opt_level = train_opt['opt_level']
             [self.netG, self.netD], [self.optimizer_G, self.optimizer_D] = amp.initialize(
                 [self.netG, self.netD], [self.optimizer_G, self.optimizer_D], opt_level=opt_level, num_losses=3)
             
