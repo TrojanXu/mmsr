@@ -3,11 +3,13 @@ from collections import OrderedDict
 
 import torch
 import torch.nn as nn
-from torch.nn.parallel import DataParallel, DistributedDataParallel
+from torch.nn.parallel import DataParallel
+from apex.parallel import DistributedDataParallel
 import models.networks as networks
 import models.lr_scheduler as lr_scheduler
 from .base_model import BaseModel
 from models.loss import CharbonnierLoss
+from apex import amp
 
 logger = logging.getLogger('base')
 
@@ -24,13 +26,7 @@ class SRModel(BaseModel):
 
         # define network and load pretrained models
         self.netG = networks.define_G(opt).to(self.device)
-        if opt['dist']:
-            self.netG = DistributedDataParallel(self.netG, device_ids=[torch.cuda.current_device()])
-        else:
-            self.netG = DataParallel(self.netG)
-        # print network
-        self.print_network()
-        self.load()
+
 
         if self.is_train:
             self.netG.train()
@@ -59,6 +55,14 @@ class SRModel(BaseModel):
             self.optimizer_G = torch.optim.Adam(optim_params, lr=train_opt['lr_G'],
                                                 weight_decay=wd_G,
                                                 betas=(train_opt['beta1'], train_opt['beta2']))
+            
+            opt_level = 'O0'
+            if 'opt_level' in train_opt:
+                opt_level = train_opt['opt_level']
+            self.netG, self.optimizer_G = amp.initialize(
+                self.netG, self.optimizer_G, opt_level=opt_level, num_losses=1)
+  
+            
             self.optimizers.append(self.optimizer_G)
 
             # schedulers
@@ -81,6 +85,15 @@ class SRModel(BaseModel):
 
             self.log_dict = OrderedDict()
 
+        if opt['dist']:
+            self.netG = DistributedDataParallel(self.netG, delay_allreduce=True)
+            #DistributedDataParallel(self.netG, device_ids=[torch.cuda.current_device()])
+        else:
+            self.netG = DataParallel(self.netG)
+        # print network
+        self.print_network()
+        self.load()
+
     def feed_data(self, data, need_GT=True):
         self.var_L = data['LQ'].to(self.device)  # LQ
         if need_GT:
@@ -90,7 +103,9 @@ class SRModel(BaseModel):
         self.optimizer_G.zero_grad()
         self.fake_H = self.netG(self.var_L)
         l_pix = self.l_pix_w * self.cri_pix(self.fake_H, self.real_H)
-        l_pix.backward()
+        #l_pix.backward()
+        with amp.scale_loss(l_pix, self.optimizer_G, loss_id=0) as l_pix_scaled:
+            l_pix_scaled.backward()
         self.optimizer_G.step()
 
         # set log
