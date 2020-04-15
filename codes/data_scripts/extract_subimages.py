@@ -11,7 +11,7 @@ from utils.util import ProgressBar  # noqa: E402
 import data.util as data_util  # noqa: E402
 
 
-def main():
+def main(scale):
     mode = 'pair'  # single (one input folder) | pair (extract corresponding GT and LR pairs)
     opt = {}
     opt['n_thread'] = 20
@@ -26,11 +26,11 @@ def main():
         opt['thres_sz'] = 48  # size threshold
         extract_signle(opt)
     elif mode == 'pair':
-        GT_folder = '../../datasets/DIV2K/DIV2K_train_HR'
-        LR_folder = '../../datasets/DIV2K/DIV2K_train_LR_bicubic/X2'
-        save_GT_folder = '../../datasets/DIV2K/DIV2K800_sub'
-        save_LR_folder = '../../datasets/DIV2K/DIV2K800_sub_bicLRx2'
-        scale_ratio = 2
+        GT_folder = './HR'
+        LR_folder = './LR_x{}'.format(scale)
+        save_GT_folder = './HR_sub'
+        save_LR_folder = './LR_x{}_sub'.format(scale)
+        scale_ratio = scale
         crop_sz = 480  # the size of each sub-image (GT)
         step = 240  # step of the sliding crop window (GT)
         thres_sz = 48  # size threshold
@@ -60,6 +60,7 @@ def main():
         opt['crop_sz'] = crop_sz
         opt['step'] = step
         opt['thres_sz'] = thres_sz
+        opt['mode']='hr'
         extract_signle(opt)
         print('process LR...')
         opt['input_folder'] = LR_folder
@@ -67,6 +68,7 @@ def main():
         opt['crop_sz'] = crop_sz // scale_ratio
         opt['step'] = step // scale_ratio
         opt['thres_sz'] = thres_sz // scale_ratio
+        opt['mode'] = 'lr'
         extract_signle(opt)
         assert len(data_util._get_paths_from_images(save_GT_folder)) == len(
             data_util._get_paths_from_images(
@@ -83,7 +85,8 @@ def extract_signle(opt):
         print('mkdir [{:s}] ...'.format(save_folder))
     else:
         print('Folder [{:s}] already exists. Exit...'.format(save_folder))
-        sys.exit(1)
+        #sys.exit(1)
+        return
     img_list = data_util._get_paths_from_images(input_folder)
 
     def update(arg):
@@ -103,7 +106,10 @@ def worker(path, opt):
     crop_sz = opt['crop_sz']
     step = opt['step']
     thres_sz = opt['thres_sz']
+    mode = opt['mode']
+
     img_name = osp.basename(path)
+    _, ext = os.path.splitext(img_name)
     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
 
     n_channels = len(img.shape)
@@ -130,12 +136,20 @@ def worker(path, opt):
             else:
                 crop_img = img[x:x + crop_sz, y:y + crop_sz, :]
             crop_img = np.ascontiguousarray(crop_img)
-            cv2.imwrite(
-                osp.join(opt['save_folder'],
-                         img_name.replace('.png', '_s{:03d}.jpg'.format(index))), crop_img,
-                [int(cv2.IMWRITE_JPEG_QUALITY), np.random.randint(70,100)]) # DIV2K is in png format, thus we it a random jpeg quality.
+            if mode == 'hr':
+                cv2.imwrite(
+                        osp.join(opt['save_folder'],
+                            img_name.replace('.jpg','.png').replace('.png', '_s{:03d}.png'.format(index))), crop_img)
+            elif mode == 'lr':
+                quality = 100 if ext == 'jpg' else np.random.randint(70,100)
+                #print(str(quality) + ' mode '+ mode + ' for' + path)
+                cv2.imwrite(
+                        osp.join(opt['save_folder'],
+                            img_name.replace('.png','.jpg').replace('.jpg', '_s{:03d}.jpg'.format(index))), crop_img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                         #img_name.replace('.jpg','.png').replace('.png', '_s{:03d}.png'.format(index))), crop_img)
     return 'Processing {:s} ...'.format(img_name)
 
 
 if __name__ == '__main__':
-    main()
+    main(2)
+    main(4)
